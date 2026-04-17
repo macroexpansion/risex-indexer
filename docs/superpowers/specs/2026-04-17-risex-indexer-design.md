@@ -2,7 +2,7 @@
 
 ## Overview
 
-A Rust PoC indexer for RISE Testnet that caches transactions and receipts in RocksDB and serves Ethereum JSON-RPC requests from cache, falling back to the upstream node on cache misses. Real-time indexing via Shred WebSocket subscriptions; best-effort backfilling of historical blocks.
+A Rust PoC indexer for RISE Testnet that caches transactions and receipts via a two-tier cache (in-memory LRU + RocksDB) and serves Ethereum JSON-RPC requests from cache, falling back to the upstream node on cache misses. Real-time indexing via Shred WebSocket subscriptions; best-effort backfilling of historical blocks. Cached data preloaded from the latest 10 blocks at startup; 5-minute TTL ensures freshness.
 
 **Scope: PoC only (4-8 hours). No reorg handling, testing, benchmarking, or monitoring.**
 
@@ -11,33 +11,40 @@ A Rust PoC indexer for RISE Testnet that caches transactions and receipts in Roc
 Single binary with 4 async tasks communicating via channels:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     risex-indexer (binary)                  │
-│                                                             │
-│  ┌──────────┐    ┌──────────┐    ┌──────────────────────┐   │
-│  │ Shred    │    │ Backfill │    │  HTTP Server (Axum)   │   │
-│  │ Subscriber│    │ Worker   │    │                       │   │
-│  │          │    │          │    │  eth_getTransaction*  │   │
-│  │  WS →    │    │  RPC →   │    │  → RocksDB lookup    │   │
-│  │  parse   │    │  parse   │    │  → fallback upstream  │   │
-│  │  tx+rcpt │    │  tx+rcpt │    │  → index on demand   │   │
-│  └────┬─────┘    └────┬─────┘    └──────────┬───────────┘   │
-│       │               │                      │               │
-│       │  mpsc::channel│                      │ read + write  │
-│       ▼               ▼                      │ (on miss)     │
-│  ┌────────────────────────────┐              │               │
-│  │    Writer Task             │◄─────────────┘               │
-│  │    (single-threaded DB)    │                               │
-│  │    RocksDB                 │                               │
-│  └────────────────────────────┘                               │
+┌───────────────────────────────────────────────────────────────┐
+│                      risex-indexer (binary)                   │
+│                                                               │
+│  ┌──────────┐    ┌──────────┐    ┌────────────────────────┐  │
+│  │ Shred    │    │ Backfill │    │  HTTP Server (Axum)     │  │
+│  │ Subscriber│    │ Worker   │    │                         │  │
+│  │          │    │          │    │  eth_getTransaction*    │  │
+│  │  WS →    │    │  RPC →   │    │  → LRU cache lookup    │  │
+│  │  parse   │    │  parse   │    │  → RocksDB lookup       │  │
+│  │  tx+rcpt │    │  tx+rcpt │    │  → fallback upstream   │  │
+│  └────┬─────┘    └────┬─────┘    └──────────┬─────────────┘  │
+│       │               │                      │                │
+│       │  mpsc::channel│                      │ (on miss)       │
+│       ▼               ▼                      │                │
+│  ┌────────────────────────────┐           │                │
+│  │    Writer Task             │◄──────────┘                │
+│  │    - writes RocksDB        │                             │
+│  │    - populates LRU cache  │                             │
+│  └────────────────────────────┘                             │
+│                                                               │
+│  ┌────────────────────────────┐                              │
+│  │    Shared LRU Cache (Arc) │                              │
+│  │    - transactions          │                              │
+│  │    - receipts              │                              │
+│  │    - TTL: 5min, ~50K entries│                              │
+│  └────────────────────────────┘                              │
 │                                                               │
 └───────────────────────────────────────────────────────────────┘
 ```
 
 - **Shred Subscriber**: WebSocket connection to RISE, subscribes to shreds, parses transactions/receipts, sends to writer channel
 - **Backfill Worker**: Iterates backwards from head block, fetches transactions/receipts via JSON-RPC, sends to writer channel
-- **HTTP Server**: Axum server handling JSON-RPC requests; serves from RocksDB or falls back to upstream
-- **Writer Task**: Single consumer of the mpsc channel; all RocksDB writes go through here for concurrency safety
+- **HTTP Server**: Axum server handling JSON-RPC requests; serves from LRU cache → RocksDB → upstream fallback
+- **Writer Task**: Single consumer of the mpsc channel; writes to RocksDB and populates the shared LRU cache
 
 ## Data Model & Storage
 
@@ -51,7 +58,38 @@ Single binary with 4 async tasks communicating via channels:
 
 **Serialization**: Postcard (compact binary serde) for stored values.
 
-**Startup behavior**: Open RocksDB, create column families if absent, read `backfill_cursor` from metadata. If present, resume from that block number. If absent, start from current head block.
+**Startup behavior**: Open RocksDB, create column families if absent, read `backfill_cursor` from metadata. If present, resume from that block number. If absent, start from current head block. Then preload the latest 10 blocks into the LRU cache (see Cache Layer section).
+
+## Cache Layer
+
+Two-tier lookup: **in-memory LRU cache → RocksDB → upstream RPC**
+
+```
+request for tx/receipt
+  → check LRU cache (O(1), in-process)
+    → hit and not expired? return
+    → expired or miss? check RocksDB
+      → hit? write to LRU, return
+      → miss? proxy upstream, write to LRU + RocksDB via writer channel, return
+```
+
+**LRU cache details:**
+- **Capacity**: ~50K entries (approximately 10 blocks worth of transactions and receipts), configurable
+- **TTL**: 5 minutes per entry. On access, check TTL — if expired, treat as miss and re-fetch from RocksDB or upstream
+- **Structure**: Two separate `moka` caches — one for transactions, one for receipts — keyed by tx hash. `moka` provides concurrent LRU with TTL support
+- **Shared**: Both caches are wrapped in `Arc` and shared across the HTTP server task and the writer task
+
+**Writer task populates LRU**: Every write to RocksDB also inserts into the LRU cache, so recent data from shreds and backfill is always hot in memory.
+
+**Preloading on startup:**
+1. After RocksDB opens and before starting other tasks, fetch the latest block number from upstream
+2. Fetch the last 10 blocks using `eth_getBlockByNumber` (with full transaction objects) and per-transaction receipts
+3. Populate both LRU caches and RocksDB with the results
+4. Then start the backfill worker at block (latest - 10) and the shred subscriber
+
+**Shred subscriber interaction**: When a new shred arrives and the writer task processes it, the writer writes to both RocksDB *and* the LRU cache, so the most recent data is always hot.
+
+**Key eviction policy**: LRU with TTL — entries are evicted when the cache is full (LRU eviction) or when accessed past their TTL (lazy expiry check on read).
 
 ## Shred Subscriber
 
@@ -85,12 +123,12 @@ Listen on configurable port (default 8545). Handle `POST /` for all JSON-RPC req
 
 ```
 incoming request → parse method
-  → eth_getTransactionByHash: lookup RocksDB → found? return : proxy upstream, index result, return
-  → eth_getTransactionReceipt: lookup RocksDB → found? return : proxy upstream, index result, return
+  → eth_getTransactionByHash: LRU lookup → RocksDB lookup → proxy upstream, index result, return
+  → eth_getTransactionReceipt: LRU lookup → RocksDB lookup → proxy upstream, index result, return
   → any other method: proxy to upstream, return response as-is
 ```
 
-**Cache miss indexing**: On a miss for `eth_getTransactionByHash` or `eth_getTransactionReceipt`, proxy to upstream, send the result to the writer channel for storage, then return the response.
+**Cache miss indexing**: On a miss for `eth_getTransactionByHash` or `eth_getTransactionReceipt`, proxy to upstream, send the result to the writer channel for storage (RocksDB + LRU), then return the response.
 
 **Batch requests**: For PoC, process single requests with full lookup/fallback logic. Pass batch requests (arrays) through to upstream unchanged.
 
@@ -117,6 +155,7 @@ incoming request → parse method
 - **serde + postcard**: Serialization
 - **tokio-tungstenite**: WebSocket client for shred subscription
 - **reqwest**: HTTP client for upstream RPC calls
+- **moka**: Concurrent LRU cache with TTL support
 - **tracing**: Structured logging
 
 ## Out of Scope
