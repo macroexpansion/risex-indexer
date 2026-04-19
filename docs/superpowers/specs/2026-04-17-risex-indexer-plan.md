@@ -21,7 +21,7 @@ Reference design: `docs/superpowers/specs/2026-04-17-risex-indexer-design.md`
 
 ## Step 2: Config & DB layer
 
-**`src/config.rs`**: 
+**`src/config.rs`**
 - Struct `Config` with env vars: `LISTEN_ADDR`, `UPSTREAM_RPC_URL`, `UPSTREAM_WS_URL`, `ROCKSDB_PATH`, `BACKFILL_DELAY_MS`, `PRELOAD_BLOCKS`
 - Implement `Config::from_env()` with defaults
 
