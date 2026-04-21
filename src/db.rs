@@ -1,6 +1,6 @@
 use alloy::primitives::B256;
-use alloy::rpc::types::eth::{Transaction, TransactionReceipt};
 use rocksdb::{ColumnFamily, DB, Options};
+use serde_json::Value;
 
 const CF_TRANSACTIONS: &str = "transactions";
 const CF_RECEIPTS: &str = "receipts";
@@ -27,7 +27,7 @@ impl Db {
         self.inner.cf_handle(name).expect("column family exists")
     }
 
-    pub fn get_transaction(&self, hash: B256) -> Result<Option<Transaction>, rocksdb::Error> {
+    pub fn get_transaction(&self, hash: B256) -> Result<Option<Value>, rocksdb::Error> {
         let cf = self.cf(CF_TRANSACTIONS);
         let key = hash.as_slice();
         match self.inner.get_cf(cf, key)? {
@@ -38,14 +38,14 @@ impl Db {
         }
     }
 
-    pub fn put_transaction(&self, hash: B256, tx: &Transaction) -> Result<(), rocksdb::Error> {
+    pub fn put_transaction(&self, hash: B256, tx: &Value) -> Result<(), rocksdb::Error> {
         let cf = self.cf(CF_TRANSACTIONS);
         let key = hash.as_slice();
         let value = serde_json::to_vec(tx).expect("serialize tx");
         self.inner.put_cf(cf, key, value)
     }
 
-    pub fn get_receipt(&self, hash: B256) -> Result<Option<TransactionReceipt>, rocksdb::Error> {
+    pub fn get_receipt(&self, hash: B256) -> Result<Option<Value>, rocksdb::Error> {
         let cf = self.cf(CF_RECEIPTS);
         let key = hash.as_slice();
         match self.inner.get_cf(cf, key)? {
@@ -56,11 +56,7 @@ impl Db {
         }
     }
 
-    pub fn put_receipt(
-        &self,
-        hash: B256,
-        receipt: &TransactionReceipt,
-    ) -> Result<(), rocksdb::Error> {
+    pub fn put_receipt(&self, hash: B256, receipt: &Value) -> Result<(), rocksdb::Error> {
         let cf = self.cf(CF_RECEIPTS);
         let key = hash.as_slice();
         let value = serde_json::to_vec(receipt).expect("serialize receipt");
@@ -99,53 +95,52 @@ mod tests {
     #[test]
     fn transaction_roundtrip() {
         let (db, _dir) = temp_db();
-        let tx: Transaction = serde_json::from_str(
-            r#"{
-                "type": "0x0",
-                "nonce": "0x1",
-                "gasPrice": "0x3e8",
-                "gas": "0x5208",
-                "to": "0x0000000000000000000000000000000000000001",
-                "value": "0x64",
-                "input": "0x",
-                "hash": "0x1111111111111111111111111111111111111111111111111111111111111111",
-                "v": "0x1c",
-                "r": "0x1",
-                "s": "0x2",
-                "from": "0x0000000000000000000000000000000000000002"
-            }"#,
-        )
-        .expect("parse tx");
-        let hash = *tx.inner.hash();
+        let tx: Value = serde_json::json!({
+            "type": "0x0",
+            "nonce": "0x1",
+            "gasPrice": "0x3e8",
+            "gas": "0x5208",
+            "to": "0x0000000000000000000000000000000000000001",
+            "value": "0x64",
+            "input": "0x",
+            "hash": "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "v": "0x1c",
+            "r": "0x1",
+            "s": "0x2",
+            "from": "0x0000000000000000000000000000000000000002"
+        });
+        let hash: B256 = "0x1111111111111111111111111111111111111111111111111111111111111111"
+            .parse()
+            .unwrap();
         db.put_transaction(hash, &tx).expect("put");
         let got = db.get_transaction(hash).expect("get").expect("some");
-        assert_eq!(*got.inner.hash(), hash);
+        assert_eq!(got["hash"], tx["hash"]);
     }
 
     #[test]
     fn receipt_roundtrip() {
         let (db, _dir) = temp_db();
-        let receipt: TransactionReceipt = serde_json::from_str(
-            r#"{
-                "type": "0x0",
-                "status": "0x1",
-                "cumulativeGasUsed": "0x5208",
-                "logs": [],
-                "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
-                "transactionHash": "0x2222222222222222222222222222222222222222222222222222222222222222",
-                "transactionIndex": "0x0",
-                "blockHash": "0x3333333333333333333333333333333333333333333333333333333333333333",
-                "blockNumber": "0x1",
-                "gasUsed": "0x5208",
-                "effectiveGasPrice": "0x3e8",
-                "from": "0x0000000000000000000000000000000000000002",
-                "to": "0x0000000000000000000000000000000000000001"
-            }"#
-        ).expect("parse receipt");
-        let hash = receipt.transaction_hash;
+        let receipt: Value = serde_json::json!({
+            "type": "0x0",
+            "status": "0x1",
+            "cumulativeGasUsed": "0x5208",
+            "logs": [],
+            "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            "transactionHash": "0x2222222222222222222222222222222222222222222222222222222222222222",
+            "transactionIndex": "0x0",
+            "blockHash": "0x3333333333333333333333333333333333333333333333333333333333333333",
+            "blockNumber": "0x1",
+            "gasUsed": "0x5208",
+            "effectiveGasPrice": "0x3e8",
+            "from": "0x0000000000000000000000000000000000000002",
+            "to": "0x0000000000000000000000000000000000000001"
+        });
+        let hash: B256 = "0x2222222222222222222222222222222222222222222222222222222222222222"
+            .parse()
+            .unwrap();
         db.put_receipt(hash, &receipt).expect("put");
         let got = db.get_receipt(hash).expect("get").expect("some");
-        assert_eq!(got.transaction_hash, hash);
+        assert_eq!(got["transactionHash"], receipt["transactionHash"]);
     }
 
     #[test]
