@@ -22,7 +22,7 @@ Reference design: `docs/superpowers/specs/2026-04-17-risex-indexer-design.md`
 ## Step 2: Config & DB layer
 
 **`src/config.rs`**
-- Struct `Config` with env vars: `LISTEN_ADDR`, `UPSTREAM_RPC_URL`, `UPSTREAM_WS_URL`, `ROCKSDB_PATH`, `BACKFILL_DELAY_MS`, `PRELOAD_BLOCKS`
+- Struct `Config` with env vars: `LISTEN_ADDR`, `UPSTREAM_RPC_URL`, `UPSTREAM_WS_URL`, `ROCKSDB_PATH`, `BACKFILL_DELAY_MS`
 - Implement `Config::from_env()` with defaults
 
 **`src/db.rs`**:
@@ -99,19 +99,7 @@ Reference design: `docs/superpowers/specs/2026-04-17-risex-indexer-design.md`
 
 **Verify**: Run manually, check DB fills with historical data.
 
-## Step 8: Preloading
-
-Add preloading to `src/main.rs` (or a `src/preload.rs` module):
-- After DB + cache init, before starting tasks:
-  1. Fetch latest block number from upstream
-  2. For blocks (latest - PRELOAD_BLOCKS + 1)..=latest:
-     - Fetch block with full transactions + each receipt
-     - Send all tx/receipt pairs to writer channel
-  3. Set backfill cursor to (latest - PRELOAD_BLOCKS)
-
-**Verify**: Start indexer, verify LRU cache is populated with recent blocks.
-
-## Step 9: HTTP server
+## Step 8: HTTP server
 
 **`src/server.rs`**:
 - Axum handler for `POST /` that accepts raw JSON-RPC body
@@ -127,7 +115,7 @@ Add preloading to `src/main.rs` (or a `src/preload.rs` module):
 
 **Verify**: `curl` test against local server for each method.
 
-## Step 10: Wire everything in main
+## Step 9: Wire everything in main
 
 **`src/main.rs`**:
 - Load config from env
@@ -135,7 +123,6 @@ Add preloading to `src/main.rs` (or a `src/preload.rs` module):
 - Create shared `Cache` (Arc)
 - Create writer channel + spawn writer task
 - Create `UpstreamClient`
-- Run preloading
 - Spawn shred subscriber task (with cancellation token)
 - Spawn backfill worker task (with cancellation token)
 - Start Axum server (with cancellation token for graceful shutdown)
@@ -153,10 +140,9 @@ Step 1 (scaffold)
   → Step 5 (RPC client)
   → Step 6 (shred subscriber) — depends on Steps 4, 5
   → Step 7 (backfill worker) — depends on Steps 4, 5
-  → Step 8 (preloading) — depends on Steps 2, 3, 4, 5
-  → Step 9 (HTTP server) — depends on Steps 2, 3, 4, 5
-  → Step 10 (wire main) — depends on all above
+  → Step 8 (HTTP server) — depends on Steps 2, 3, 4, 5
+  → Step 9 (wire main) — depends on all above
 ```
 
 Steps 6 and 7 can be developed in parallel after Step 5.
-Steps 8 and 9 can be developed in parallel after Step 5.
+Step 8 can be developed after Step 5.

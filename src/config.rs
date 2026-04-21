@@ -10,7 +10,6 @@ pub struct Config {
     pub backfill_max_blocks: Option<u64>,
     pub backfill_block_concurrency: usize,
     pub backfill_concurrency: usize,
-    pub preload_blocks: u64,
 }
 
 impl Config {
@@ -41,10 +40,6 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(16),
-            preload_blocks: env::var("PRELOAD_BLOCKS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(100),
         }
     }
 }
