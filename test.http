@@ -1,0 +1,24 @@
+@baseUrl = http://localhost:8545
+
+
+### get tx by hash
+POST {{baseUrl}}/
+Content-Type: application/json
+
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "eth_getTransactionByHash",
+  "params": ["0x380ffe34d097033db9ac37ff617de07068171b297a3091623141e4095fd44b02"]
+}
+
+### get tx receipt
+POST {{baseUrl}}/
+Content-Type: application/json
+
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "eth_getTransactionReceipt",
+  "params": ["0x380ffe34d097033db9ac37ff617de07068171b297a3091623141e4095fd44b02"]
+}

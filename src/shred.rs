@@ -89,7 +89,22 @@ async fn subscribe_shreds(
                         .and_then(|t| t.as_array())
                         .map(|a| a.len())
                         .unwrap_or(0);
-                    tracing::info!(block_number, tx_count, "shred notification");
+                    let hashes: Vec<&str> = notification
+                        .get("params")
+                        .and_then(|p| p.get("result"))
+                        .and_then(|r| r.get("transactions"))
+                        .and_then(|t| t.as_array())
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|tx| {
+                                    tx.get("transaction")
+                                        .and_then(|t| t.get("hash"))
+                                        .and_then(|h| h.as_str())
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    tracing::trace!(block_number, tx_count, ?hashes, "shred notification");
                     process_notification(&notification, sender).await;
                 }
             }

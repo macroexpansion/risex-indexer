@@ -31,7 +31,8 @@ impl Config {
                 .unwrap_or(200),
             backfill_max_blocks: env::var("BACKFILL_MAX_BLOCKS")
                 .ok()
-                .and_then(|v| v.parse().ok()),
+                .and_then(|v| v.parse().ok())
+                .or(Some(10)),
             backfill_block_concurrency: env::var("BACKFILL_BLOCK_CONCURRENCY")
                 .ok()
                 .and_then(|v| v.parse().ok())
