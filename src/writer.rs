@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use alloy::primitives::B256;
-use alloy::rpc::types::eth::{Transaction, TransactionReceipt};
+use serde_json::Value;
 use tokio::sync::mpsc;
 
 use crate::cache::AppCache;
@@ -10,11 +10,11 @@ use crate::db::Db;
 pub enum WriterMessage {
     StoreTransaction {
         hash: B256,
-        tx: Transaction,
+        tx: Value,
     },
     StoreReceipt {
         hash: B256,
-        receipt: TransactionReceipt,
+        receipt: Value,
     },
     StoreBackfillCursor {
         block_number: u64,
@@ -25,7 +25,7 @@ pub fn create_writer_channel() -> (mpsc::Sender<WriterMessage>, mpsc::Receiver<W
     mpsc::channel(10_000)
 }
 
-pub async fn run_writer_task(db: Db, cache: Arc<AppCache>, mut rx: mpsc::Receiver<WriterMessage>) {
+pub async fn run_writer_task(db: Arc<Db>, cache: Arc<AppCache>, mut rx: mpsc::Receiver<WriterMessage>) {
     tracing::info!("writer task started");
     while let Some(msg) = rx.recv().await {
         match msg {
@@ -59,14 +59,14 @@ mod tests {
     use tempfile::TempDir;
 
     fn setup() -> (
-        Db,
+        Arc<Db>,
         Arc<AppCache>,
         mpsc::Sender<WriterMessage>,
         mpsc::Receiver<WriterMessage>,
         TempDir,
     ) {
         let dir = TempDir::new().expect("temp dir");
-        let db = Db::open(dir.path().to_str().expect("path")).expect("open db");
+        let db = Arc::new(Db::open(dir.path().to_str().expect("path")).expect("open db"));
         let cache = AppCache::new();
         let (tx, rx) = create_writer_channel();
         (db, cache, tx, rx, dir)
@@ -74,25 +74,24 @@ mod tests {
 
     #[tokio::test]
     async fn store_transaction() {
-        let (db, cache, sender, mut rx, _dir) = setup();
-        let tx: Transaction = serde_json::from_str(
-            r#"{
-                "type": "0x0",
-                "nonce": "0x1",
-                "gasPrice": "0x3e8",
-                "gas": "0x5208",
-                "to": "0x0000000000000000000000000000000000000001",
-                "value": "0x64",
-                "input": "0x",
-                "hash": "0x1111111111111111111111111111111111111111111111111111111111111111",
-                "v": "0x1c",
-                "r": "0x1",
-                "s": "0x2",
-                "from": "0x0000000000000000000000000000000000000002"
-            }"#,
-        )
-        .expect("parse tx");
-        let hash = *tx.inner.hash();
+        let (db, cache, sender, rx, _dir) = setup();
+        let tx: Value = serde_json::json!({
+            "type": "0x0",
+            "nonce": "0x1",
+            "gasPrice": "0x3e8",
+            "gas": "0x5208",
+            "to": "0x0000000000000000000000000000000000000001",
+            "value": "0x64",
+            "input": "0x",
+            "hash": "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "v": "0x1c",
+            "r": "0x1",
+            "s": "0x2",
+            "from": "0x0000000000000000000000000000000000000002"
+        });
+        let hash: B256 = "0x1111111111111111111111111111111111111111111111111111111111111111"
+            .parse()
+            .unwrap();
 
         sender
             .send(WriterMessage::StoreTransaction {
@@ -113,25 +112,25 @@ mod tests {
 
     #[tokio::test]
     async fn store_receipt() {
-        let (db, cache, sender, mut rx, _dir) = setup();
-        let receipt: TransactionReceipt = serde_json::from_str(
-            r#"{
-                "type": "0x0",
-                "status": "0x1",
-                "cumulativeGasUsed": "0x5208",
-                "logs": [],
-                "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
-                "transactionHash": "0x2222222222222222222222222222222222222222222222222222222222222222",
-                "transactionIndex": "0x0",
-                "blockHash": "0x3333333333333333333333333333333333333333333333333333333333333333",
-                "blockNumber": "0x1",
-                "gasUsed": "0x5208",
-                "effectiveGasPrice": "0x3e8",
-                "from": "0x0000000000000000000000000000000000000002",
-                "to": "0x0000000000000000000000000000000000000001"
-            }"#
-        ).expect("parse receipt");
-        let hash = receipt.transaction_hash;
+        let (db, cache, sender, rx, _dir) = setup();
+        let receipt: Value = serde_json::json!({
+            "type": "0x0",
+            "status": "0x1",
+            "cumulativeGasUsed": "0x5208",
+            "logs": [],
+            "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            "transactionHash": "0x2222222222222222222222222222222222222222222222222222222222222222",
+            "transactionIndex": "0x0",
+            "blockHash": "0x3333333333333333333333333333333333333333333333333333333333333333",
+            "blockNumber": "0x1",
+            "gasUsed": "0x5208",
+            "effectiveGasPrice": "0x3e8",
+            "from": "0x0000000000000000000000000000000000000002",
+            "to": "0x0000000000000000000000000000000000000001"
+        });
+        let hash: B256 = "0x2222222222222222222222222222222222222222222222222222222222222222"
+            .parse()
+            .unwrap();
 
         sender
             .send(WriterMessage::StoreReceipt { hash, receipt })
@@ -149,7 +148,7 @@ mod tests {
 
     #[tokio::test]
     async fn store_backfill_cursor() {
-        let (db, cache, sender, mut rx, _dir) = setup();
+        let (db, cache, sender, rx, dir) = setup();
         sender
             .send(WriterMessage::StoreBackfillCursor { block_number: 42 })
             .await
@@ -158,8 +157,7 @@ mod tests {
 
         run_writer_task(db, cache, rx).await;
 
-        // Reopen DB to verify persistence
-        let dir_path = _dir.path().to_str().expect("path");
+        let dir_path = dir.path().to_str().expect("path");
         let db2 = Db::open(dir_path).expect("reopen db");
         assert_eq!(db2.get_backfill_cursor().expect("get"), Some(42));
     }
