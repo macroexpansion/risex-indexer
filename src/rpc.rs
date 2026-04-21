@@ -3,16 +3,55 @@ use alloy::providers::{Provider, RootProvider};
 use alloy::rpc::types::eth::Block;
 use alloy::transports::TransportError;
 use serde_json::{Value, json};
+use std::sync::OnceLock;
 
 #[derive(Clone)]
 pub struct UpstreamClient {
     provider: RootProvider,
+    rpc_url: String,
+    http: std::sync::Arc<OnceLock<reqwest::Client>>,
 }
 
 impl UpstreamClient {
     pub fn new(rpc_url: String) -> Self {
+        let url = rpc_url.clone();
         Self {
             provider: RootProvider::new_http(rpc_url.parse().expect("invalid RPC URL")),
+            rpc_url: url,
+            http: std::sync::Arc::new(OnceLock::new()),
+        }
+    }
+
+    fn http_client(&self) -> &reqwest::Client {
+        self.http.get_or_init(|| reqwest::Client::new())
+    }
+
+    pub async fn proxy_raw(&self, body: &[u8]) -> Value {
+        let client = self.http_client();
+        match client
+            .post(&self.rpc_url)
+            .header("content-type", "application/json")
+            .body(body.to_vec())
+            .send()
+            .await
+        {
+            Ok(resp) => match resp.text().await {
+                Ok(text) => serde_json::from_str(&text).unwrap_or_else(|e| json!({
+                    "jsonrpc": "2.0",
+                    "id": Value::Null,
+                    "error": { "code": -32603, "message": format!("upstream decode error: {e}") }
+                })),
+                Err(e) => json!({
+                    "jsonrpc": "2.0",
+                    "id": Value::Null,
+                    "error": { "code": -32603, "message": format!("upstream read error: {e}") }
+                }),
+            },
+            Err(e) => json!({
+                "jsonrpc": "2.0",
+                "id": Value::Null,
+                "error": { "code": -32603, "message": format!("upstream transport error: {e}") }
+            }),
         }
     }
 

@@ -20,7 +20,7 @@ impl Config {
             upstream_rpc_url: env::var("UPSTREAM_RPC_URL")
                 .unwrap_or_else(|_| "https://testnet.riselabs.xyz".into()),
             upstream_ws_url: env::var("UPSTREAM_WS_URL")
-                .unwrap_or_else(|_| "wss://testnet.riselabs.xyz".into()),
+                .unwrap_or_else(|_| "wss://testnet.riselabs.xyz/ws".into()),
             rocksdb_path: env::var("ROCKSDB_PATH").unwrap_or_else(|_| "./data".into()),
             backfill_delay_min_ms: env::var("BACKFILL_DELAY_MIN_MS")
                 .ok()

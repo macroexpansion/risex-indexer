@@ -2,6 +2,11 @@ use alloy::primitives::B256;
 use rocksdb::{ColumnFamily, DB, Options};
 use serde_json::Value;
 
+pub struct DbEntry {
+    pub hash: B256,
+    pub value: Value,
+}
+
 const CF_TRANSACTIONS: &str = "transactions";
 const CF_RECEIPTS: &str = "receipts";
 const CF_METADATA: &str = "metadata";
@@ -78,6 +83,28 @@ impl Db {
         let cf = self.cf(CF_METADATA);
         let value = block_number.to_be_bytes();
         self.inner.put_cf(cf, KEY_BACKFILL_CURSOR, value)
+    }
+
+    pub fn iter_transactions(&self) -> impl Iterator<Item = DbEntry> + '_ {
+        let cf = self.cf(CF_TRANSACTIONS);
+        let iter = self.inner.iterator_cf(cf, rocksdb::IteratorMode::Start);
+        iter.filter_map(|result| {
+            let (key, val) = result.ok()?;
+            let hash = B256::from_slice(&key);
+            let value: Value = serde_json::from_slice(&val).ok()?;
+            Some(DbEntry { hash, value })
+        })
+    }
+
+    pub fn iter_receipts(&self) -> impl Iterator<Item = DbEntry> + '_ {
+        let cf = self.cf(CF_RECEIPTS);
+        let iter = self.inner.iterator_cf(cf, rocksdb::IteratorMode::Start);
+        iter.filter_map(|result| {
+            let (key, val) = result.ok()?;
+            let hash = B256::from_slice(&key);
+            let value: Value = serde_json::from_slice(&val).ok()?;
+            Some(DbEntry { hash, value })
+        })
     }
 }
 
