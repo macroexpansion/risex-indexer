@@ -45,6 +45,24 @@ cargo run --example backfill
 cargo run --example shred
 ```
 
+### JSON-RPC requests
+
+Get transaction by hash:
+
+```sh
+curl -X POST http://localhost:8545/ \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"eth_getTransactionByHash","params":["0x380ffe34d097033db9ac37ff617de07068171b297a3091623141e4095fd44b02"]}'
+```
+
+Get transaction receipt:
+
+```sh
+curl -X POST http://localhost:8545/ \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"eth_getTransactionReceipt","params":["0x380ffe34d097033db9ac37ff617de07068171b297a3091623141e4095fd44b02"]}'
+```
+
 ## Testing
 
 ```sh
