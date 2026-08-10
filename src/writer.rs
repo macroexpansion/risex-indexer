@@ -8,24 +8,20 @@ use crate::cache::AppCache;
 use crate::db::Db;
 
 pub enum WriterMessage {
-    StoreTransaction {
-        hash: B256,
-        tx: Value,
-    },
-    StoreReceipt {
-        hash: B256,
-        receipt: Value,
-    },
-    StoreBackfillCursor {
-        block_number: u64,
-    },
+    StoreTransaction { hash: B256, tx: Value },
+    StoreReceipt { hash: B256, receipt: Value },
+    StoreBackfillCursor { block_number: u64 },
 }
 
 pub fn create_writer_channel() -> (mpsc::Sender<WriterMessage>, mpsc::Receiver<WriterMessage>) {
     mpsc::channel(10_000)
 }
 
-pub async fn run_writer_task(db: Arc<Db>, cache: Arc<AppCache>, mut rx: mpsc::Receiver<WriterMessage>) {
+pub async fn run_writer_task(
+    db: Arc<Db>,
+    cache: Arc<AppCache>,
+    mut rx: mpsc::Receiver<WriterMessage>,
+) {
     tracing::info!("writer task started");
     while let Some(msg) = rx.recv().await {
         match msg {

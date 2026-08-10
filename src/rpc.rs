@@ -2,14 +2,22 @@ use alloy::primitives::B256;
 use alloy::providers::{Provider, RootProvider};
 use alloy::rpc::types::eth::Block;
 use alloy::transports::TransportError;
-use serde_json::{Value, json};
+use serde_json::{Value, json, value};
+use std::sync::Arc;
 use std::sync::OnceLock;
+use tokio::sync::Mutex;
+
+use dashmap::DashMap;
+use std::collections::HashMap;
 
 #[derive(Clone)]
 pub struct UpstreamClient {
     provider: RootProvider,
     rpc_url: String,
     http: std::sync::Arc<OnceLock<reqwest::Client>>,
+
+    hashes: DashMap<B256, Value>,
+    queue: DashMap<B256, u64>,
 }
 
 impl UpstreamClient {
@@ -19,6 +27,8 @@ impl UpstreamClient {
             provider: RootProvider::new_http(rpc_url.parse().expect("invalid RPC URL")),
             rpc_url: url,
             http: std::sync::Arc::new(OnceLock::new()),
+            hashes: DashMap::new(),
+            queue: DashMap::new(),
         }
     }
 
@@ -99,18 +109,48 @@ impl UpstreamClient {
         &self,
         hash: B256,
     ) -> Result<Option<Value>, UpstreamError> {
-        let result: Value = self
-            .provider
-            .raw_request(
-                "eth_getTransactionReceipt".into(),
-                vec![json!(format!("{hash:#x}"))],
-            )
-            .await
-            .map_err(UpstreamError::Transport)?;
-        if result.is_null() {
-            return Ok(None);
+        if let Some(mut value) = self.queue.get_mut(&hash) {
+            *value += 1;
+        } else {
+            self.queue.insert(hash, 0);
         }
-        Ok(Some(result))
+
+        let hash_value = self.hashes.get(&hash);
+        match hash_value {
+            Some(value) => {
+                if let Some(mut value) = self.queue.get_mut(&hash) {
+                    *value -= 1;
+                    if *value == 0 {
+                        self.hashes.remove(&hash);
+                    }
+                }
+
+                if self.hashes.get(&hash).is_none() {
+                    println!("cache deleted");
+                } else {
+                    println!("cache not deleted");
+                }
+
+                Ok(Some(value.to_owned()))
+            }
+            None => {
+                let result: Value = self
+                    .provider
+                    .raw_request(
+                        "eth_getTransactionReceipt".into(),
+                        vec![json!(format!("{hash:#x}"))],
+                    )
+                    .await
+                    .map_err(UpstreamError::Transport)?;
+                if result.is_null() {
+                    return Ok(None);
+                }
+
+                self.hashes.insert(hash, result.clone());
+
+                Ok(Some(result))
+            }
+        }
     }
 
     pub async fn proxy_request(

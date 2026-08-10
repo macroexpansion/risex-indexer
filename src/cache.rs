@@ -116,6 +116,9 @@ mod tests {
         let tx = make_tx();
         cache.insert_transaction(hash, tx);
         let got = cache.get_transaction(&hash).unwrap();
-        assert_eq!(got["hash"], "0x1111111111111111111111111111111111111111111111111111111111111111");
+        assert_eq!(
+            got["hash"],
+            "0x1111111111111111111111111111111111111111111111111111111111111111"
+        );
     }
 }

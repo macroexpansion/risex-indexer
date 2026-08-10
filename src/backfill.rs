@@ -2,12 +2,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rand::RngExt;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::{Semaphore, mpsc};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 use crate::db::Db;
-use crate::rpc::{extract_tx_hashes_from_block, UpstreamClient, UpstreamError};
+use crate::rpc::{UpstreamClient, UpstreamError, extract_tx_hashes_from_block};
 use crate::writer::WriterMessage;
 
 pub async fn run_backfill_worker(
@@ -217,6 +217,9 @@ async fn backfill_block_concurrent(
                 tracing::warn!(%hash, block_number, "receipt not found or fetch failed");
             }
         });
+
+        // INFO: limit to 1 hash
+        break;
     }
 
     while let Some(result) = hash_tasks.join_next().await {

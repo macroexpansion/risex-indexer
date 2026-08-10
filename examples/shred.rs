@@ -40,12 +40,7 @@ async fn main() {
         cancel_handle.cancel();
     });
 
-    shred::run_shred_subscriber(
-        UPSTREAM_WS_URL.to_string(),
-        sender,
-        cancel,
-    )
-    .await;
+    shred::run_shred_subscriber(UPSTREAM_WS_URL.to_string(), sender, cancel).await;
 
     drop(sender_drop);
     tracing::info!("waiting for writer to flush...");

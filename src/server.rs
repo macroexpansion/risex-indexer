@@ -44,13 +44,12 @@ struct JsonRpcError {
 }
 
 pub fn create_app(state: AppState) -> axum::Router {
-    axum::Router::new().route("/", post(handle_rpc)).with_state(state)
+    axum::Router::new()
+        .route("/", post(handle_rpc))
+        .with_state(state)
 }
 
-async fn handle_rpc(
-    State(state): State<AppState>,
-    body: axum::body::Bytes,
-) -> impl IntoResponse {
+async fn handle_rpc(State(state): State<AppState>, body: axum::body::Bytes) -> impl IntoResponse {
     let parsed: Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
         Err(e) => {
@@ -90,7 +89,9 @@ async fn handle_rpc(
 async fn handle_get_transaction_by_hash(state: &AppState, req: &JsonRpcRequest) -> Value {
     let hash = match extract_hash(req) {
         Some(h) => h,
-        None => return error_response(&req.id, -32602, "invalid params: expected transaction hash"),
+        None => {
+            return error_response(&req.id, -32602, "invalid params: expected transaction hash");
+        }
     };
 
     if let Some(tx) = state.cache.get_transaction(&hash) {
@@ -110,7 +111,10 @@ async fn handle_get_transaction_by_hash(state: &AppState, req: &JsonRpcRequest) 
 
     match state.client.get_transaction_by_hash(hash).await {
         Ok(Some(tx)) => {
-            let _ = state.sender.try_send(WriterMessage::StoreTransaction { hash, tx: tx.clone() });
+            let _ = state.sender.try_send(WriterMessage::StoreTransaction {
+                hash,
+                tx: tx.clone(),
+            });
             success_response(&req.id, tx)
         }
         Ok(None) => success_response(&req.id, Value::Null),
@@ -121,27 +125,32 @@ async fn handle_get_transaction_by_hash(state: &AppState, req: &JsonRpcRequest) 
 async fn handle_get_transaction_receipt(state: &AppState, req: &JsonRpcRequest) -> Value {
     let hash = match extract_hash(req) {
         Some(h) => h,
-        None => return error_response(&req.id, -32602, "invalid params: expected transaction hash"),
+        None => {
+            return error_response(&req.id, -32602, "invalid params: expected transaction hash");
+        }
     };
 
-    if let Some(receipt) = state.cache.get_receipt(&hash) {
-        tracing::info!(%hash, "cache hit for receipt");
-        return success_response(&req.id, receipt);
-    }
+    // if let Some(receipt) = state.cache.get_receipt(&hash) {
+    //     tracing::info!(%hash, "cache hit for receipt");
+    //     return success_response(&req.id, receipt);
+    // }
 
     tracing::info!(%hash, "cache miss for receipt, checking db");
 
-    if let Ok(Some(receipt)) = state.db.get_receipt(hash) {
-        tracing::info!(%hash, "db hit for receipt, promoting to cache");
-        state.cache.insert_receipt(hash, receipt.clone());
-        return success_response(&req.id, receipt);
-    }
+    // if let Ok(Some(receipt)) = state.db.get_receipt(hash) {
+    //     tracing::info!(%hash, "db hit for receipt, promoting to cache");
+    //     state.cache.insert_receipt(hash, receipt.clone());
+    //     return success_response(&req.id, receipt);
+    // }
 
     tracing::info!(%hash, "db miss for receipt, fetching from upstream");
 
     match state.client.get_transaction_receipt(hash).await {
         Ok(Some(receipt)) => {
-            let _ = state.sender.try_send(WriterMessage::StoreReceipt { hash, receipt: receipt.clone() });
+            // let _ = state.sender.try_send(WriterMessage::StoreReceipt {
+            //     hash,
+            //     receipt: receipt.clone(),
+            // });
             success_response(&req.id, receipt)
         }
         Ok(None) => success_response(&req.id, Value::Null),

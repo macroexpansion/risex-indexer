@@ -94,4 +94,3 @@ async fn main() {
 
     tracing::info!("risex-indexer stopped");
 }
-
